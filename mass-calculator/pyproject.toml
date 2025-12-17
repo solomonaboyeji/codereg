@@ -1,0 +1,21 @@
+[project]
+name = "aicli"
+version = "0.1.0"
+description = "AI-powered CLI for code modification using Ollama"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.1.0",
+    "requests>=2.31.0",
+    "rich>=13.7.0",
+    "prompt-toolkit>=3.0.43",
+]
+
+[project.scripts]
+aicli = "aicli.main:cli"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
