@@ -2,6 +2,7 @@
 
 import json
 import requests
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Iterator
 
 
@@ -75,17 +76,25 @@ class OllamaClient:
 class ConversationManager:
     """Manages conversation history and context."""
 
-    def __init__(self, system_prompt: str, max_history: int = 50):
-        self.messages: List[Dict[str, Any]] = []
+    def __init__(self, system_prompt: str, max_history: int = 50, history_file: Optional[str] = None):
         self.system_prompt = system_prompt
         self.max_history = max_history
+        self.history_file = Path(history_file) if history_file else None
 
-        # Add system message
-        if system_prompt:
-            self.messages.append({
-                "role": "system",
-                "content": system_prompt
-            })
+        # Load existing messages from file if it exists
+        if self.history_file and self.history_file.exists():
+            self.messages = self._load_history()
+        else:
+            self.messages: List[Dict[str, Any]] = []
+            # Add system message
+            if system_prompt:
+                self.messages.append({
+                    "role": "system",
+                    "content": system_prompt
+                })
+            # Save initial state
+            if self.history_file:
+                self._save_history()
 
     def add_user_message(self, content: str):
         """Add a user message to the conversation."""
@@ -94,6 +103,7 @@ class ConversationManager:
             "content": content
         })
         self._trim_history()
+        self._save_history()
 
     def add_assistant_message(self, content: str, tool_calls: Optional[List[Dict]] = None):
         """Add an assistant message to the conversation."""
@@ -107,6 +117,7 @@ class ConversationManager:
 
         self.messages.append(message)
         self._trim_history()
+        self._save_history()
 
     def add_tool_result(self, tool_call_id: str, tool_name: str, result: Any):
         """Add a tool result to the conversation."""
@@ -121,6 +132,7 @@ class ConversationManager:
             "content": result_str
         })
         self._trim_history()
+        self._save_history()
 
     def get_messages(self) -> List[Dict[str, Any]]:
         """Get all messages in the conversation."""
@@ -140,3 +152,35 @@ class ConversationManager:
         """Clear conversation history except system message."""
         system_msg = next((msg for msg in self.messages if msg["role"] == "system"), None)
         self.messages = [system_msg] if system_msg else []
+        self._save_history()
+
+    def _save_history(self):
+        """Save conversation history to file."""
+        if not self.history_file:
+            return
+
+        try:
+            # Ensure parent directory exists
+            self.history_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Save messages to file
+            with open(self.history_file, 'w') as f:
+                json.dump(self.messages, f, indent=2)
+        except Exception as e:
+            # Silently fail if we can't save (e.g., permissions issue)
+            pass
+
+    def _load_history(self) -> List[Dict[str, Any]]:
+        """Load conversation history from file."""
+        try:
+            with open(self.history_file, 'r') as f:
+                return json.load(f)
+        except Exception:
+            # If loading fails, start fresh with system message
+            messages = []
+            if self.system_prompt:
+                messages.append({
+                    "role": "system",
+                    "content": self.system_prompt
+                })
+            return messages

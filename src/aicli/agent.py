@@ -2,15 +2,24 @@
 
 import json
 import re
+from pathlib import Path
 from typing import Optional
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.syntax import Syntax
+from rich.prompt import Confirm
 
 from .ollama_client import OllamaClient, ConversationManager
 from .tools import ToolRegistry
 
+
+# Tools that require user permission before execution
+PERMISSION_REQUIRED_TOOLS = {
+    "write_file",
+    "edit_file",
+    "bash"
+}
 
 SYSTEM_PROMPT = """You are an AI coding assistant that helps users modify and understand code projects.
 
@@ -117,16 +126,22 @@ class Agent:
         ollama_url: str = "http://localhost:11434",
         model: str = "qwen3-coder:30b",
         project_dir: str = ".",
-        max_iterations: int = 10,
-        debug: bool = False
+        max_iterations: int = 100,
+        debug: bool = False,
+        auto_approve: bool = False
     ):
         self.client = OllamaClient(base_url=ollama_url, model=model)
         self.tools = ToolRegistry()
-        self.conversation = ConversationManager(SYSTEM_PROMPT)
+
+        # Use a persistent conversation history file
+        history_file = Path.home() / ".aicli_conversation.json"
+        self.conversation = ConversationManager(SYSTEM_PROMPT, history_file=str(history_file))
+
         self.console = Console()
         self.project_dir = project_dir
         self.max_iterations = max_iterations
         self.debug = debug
+        self.auto_approve = auto_approve
 
     def run(self, user_message: str, stream: bool = True) -> str:
         """Run the agent with a user message.
@@ -277,6 +292,22 @@ class Agent:
                 )
             )
 
+            # Check if permission is required
+            if tool_name in PERMISSION_REQUIRED_TOOLS:
+                if not self._request_permission(tool_name, arguments):
+                    result = {"error": "Permission denied by user"}
+                    self.console.print(
+                        Panel(
+                            "[yellow]⚠️  Tool execution cancelled by user[/yellow]",
+                            title="❌ Permission Denied",
+                            border_style="yellow"
+                        )
+                    )
+                    # Add result to conversation
+                    tool_call_id = tool_call.get("id", "")
+                    self.conversation.add_tool_result(tool_call_id, tool_name, result)
+                    continue
+
             # Execute the tool
             result = self.tools.execute_tool(tool_name, **arguments)
 
@@ -286,6 +317,72 @@ class Agent:
             # Add result to conversation
             tool_call_id = tool_call.get("id", "")
             self.conversation.add_tool_result(tool_call_id, tool_name, result)
+
+    def _request_permission(self, tool_name: str, arguments: dict) -> bool:
+        """Request user permission before executing a tool.
+
+        Args:
+            tool_name: The name of the tool to execute
+            arguments: The arguments for the tool
+
+        Returns:
+            True if permission granted, False otherwise
+        """
+        # Auto-approve if enabled
+        if self.auto_approve:
+            return True
+
+        # Format the permission prompt based on the tool
+        if tool_name == "write_file":
+            file_path = arguments.get("file_path", "unknown")
+            content_preview = arguments.get("content", "")[:100]
+            if len(arguments.get("content", "")) > 100:
+                content_preview += "..."
+
+            self.console.print(
+                Panel(
+                    f"[yellow]File:[/yellow] {file_path}\n"
+                    f"[yellow]Preview:[/yellow] {content_preview}",
+                    title="⚠️  Write File Permission",
+                    border_style="yellow"
+                )
+            )
+            return Confirm.ask("[bold yellow]Allow write to this file?[/bold yellow]", default=True)
+
+        elif tool_name == "edit_file":
+            file_path = arguments.get("file_path", "unknown")
+            old_text = arguments.get("old_text", "")[:50]
+            new_text = arguments.get("new_text", "")[:50]
+            if len(arguments.get("old_text", "")) > 50:
+                old_text += "..."
+            if len(arguments.get("new_text", "")) > 50:
+                new_text += "..."
+
+            self.console.print(
+                Panel(
+                    f"[yellow]File:[/yellow] {file_path}\n"
+                    f"[yellow]Replace:[/yellow] {old_text}\n"
+                    f"[yellow]With:[/yellow] {new_text}",
+                    title="⚠️  Edit File Permission",
+                    border_style="yellow"
+                )
+            )
+            return Confirm.ask("[bold yellow]Allow this file edit?[/bold yellow]", default=True)
+
+        elif tool_name == "bash":
+            command = arguments.get("command", "unknown")
+
+            self.console.print(
+                Panel(
+                    f"[yellow]Command:[/yellow] {command}",
+                    title="⚠️  Bash Command Permission",
+                    border_style="yellow"
+                )
+            )
+            return Confirm.ask("[bold yellow]Allow this command to run?[/bold yellow]", default=True)
+
+        # Default: ask for permission
+        return Confirm.ask(f"[bold yellow]Allow {tool_name}?[/bold yellow]", default=True)
 
     def _display_tool_result(self, tool_name: str, result: dict):
         """Display tool execution result in a nice format."""

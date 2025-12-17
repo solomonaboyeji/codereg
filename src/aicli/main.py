@@ -80,8 +80,9 @@ def models(ctx):
 @click.argument('message', required=False)
 @click.option('--debug', is_flag=True, help='Enable debug output')
 @click.option('--no-stream', is_flag=True, help='Disable streaming for better tool calling')
+@click.option('--auto-approve', is_flag=True, help='Auto-approve all tool executions (skip permission prompts)')
 @click.pass_context
-def ask(ctx, message, debug, no_stream):
+def ask(ctx, message, debug, no_stream, auto_approve):
     """Ask a single question or give a single instruction."""
     model = ctx.obj['model']
     url = ctx.obj['url']
@@ -116,7 +117,8 @@ def ask(ctx, message, debug, no_stream):
             ollama_url=url,
             model=model,
             project_dir=project_dir,
-            debug=debug
+            debug=debug,
+            auto_approve=auto_approve
         )
 
         agent.run(message, stream=not no_stream)
@@ -128,8 +130,9 @@ def ask(ctx, message, debug, no_stream):
 
 
 @cli.command()
+@click.option('--auto-approve', is_flag=True, help='Auto-approve all tool executions (skip permission prompts)')
 @click.pass_context
-def chat(ctx):
+def chat(ctx, auto_approve):
     """Start interactive chat mode."""
     model = ctx.obj['model']
     url = ctx.obj['url']
@@ -148,7 +151,8 @@ def chat(ctx):
         console.print(Panel(
             f"[bold cyan]Interactive Chat Mode[/bold cyan]\n\n"
             f"[cyan]Model:[/cyan] {model}\n"
-            f"[cyan]Project:[/cyan] {project_dir}\n\n"
+            f"[cyan]Project:[/cyan] {project_dir}\n"
+            f"[cyan]Permissions:[/cyan] {'Auto-approve (⚠️  no prompts)' if auto_approve else 'Ask before file changes'}\n\n"
             f"Type your messages and press Enter. The AI can read, edit, and create files.\n\n"
             f"Commands:\n"
             f"  [green]/clear[/green]  - Clear conversation history\n"
@@ -163,7 +167,8 @@ def chat(ctx):
         agent = Agent(
             ollama_url=url,
             model=model,
-            project_dir=project_dir
+            project_dir=project_dir,
+            auto_approve=auto_approve
         )
 
         # Create prompt session with history
